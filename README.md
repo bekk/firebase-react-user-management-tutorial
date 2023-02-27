@@ -24,7 +24,15 @@ Before we start building we're going to set up our Database and API. This is as 
 Now we are going to set up the database.
 
 1. Go to the Firestore Database page in the Dashboard.
-2. Initialize the database in your preferred region.
+2. Initialize the database in test mode in your preferred region.
+
+### Set up Email link (passwordless sign-in)
+
+We will be using "magic links" in this tutorial. Let's set it up.
+
+1. Go to the Authentication page in the Dashboard.
+2. Go to the "Sign-in method" tab
+3. Enable Email/Password and Email link (passwordless sign-in)
 
 ### Get the API Keys
 
@@ -92,10 +100,14 @@ Let's set up a React component to manage logins and sign ups. We'll use Magic Li
 Create and edit `src/Auth.js`:
 
 ```jsx
-import { useState } from "react";
-import { getAuth, sendSignInLinkToEmail } from "firebase/auth";
+import { useEffect, useState } from "react";
+import {
+  sendSignInLinkToEmail,
+  isSignInWithEmailLink,
+  signInWithEmailLink,
+} from "firebase/auth";
 
-const auth = getAuth();
+import { auth } from "./firebaseClient";
 
 export default function Auth() {
   const [loading, setLoading] = useState(false);
@@ -114,11 +126,7 @@ export default function Auth() {
         // This must be true.
         handleCodeInApp: true,
       };
-      const { error } = await sendSignInLinkToEmail(
-        auth,
-        email,
-        actionCodeSettings
-      )
+      await sendSignInLinkToEmail(auth, email, actionCodeSettings)
         .then(() => {
           // The link was successfully sent. Inform the user.
           // Save the email locally so you don't need to ask the user for it again
@@ -127,18 +135,48 @@ export default function Auth() {
           // ...
         })
         .catch((error) => {
-          const errorCode = error.code;
-          const errorMessage = error.message;
-          // ...
+          console.error(error);
         });
-      if (error) throw error;
       alert("Check your email for the login link!");
     } catch (error) {
+      console.error(error);
       alert(error.error_description || error.message);
     } finally {
       setLoading(false);
     }
   };
+
+  useEffect(() => {
+    // Confirm the link is a sign-in with email link.
+    if (isSignInWithEmailLink(auth, window.location.href)) {
+      // Additional state parameters can also be passed via URL.
+      // This can be used to continue the user's intended action before triggering
+      // the sign-in operation.
+      // Get the email if available. This should be available if the user completes
+      // the flow on the same device where they started it.
+      let email = window.localStorage.getItem("emailForSignIn");
+      if (!email) {
+        // User opened the link on a different device. To prevent session fixation
+        // attacks, ask the user to provide the associated email again. For example:
+        email = window.prompt("Please provide your email for confirmation");
+      }
+      // The client SDK will parse the code from the link for you.
+      signInWithEmailLink(auth, email, window.location.href)
+        .then((result) => {
+          // Clear email from storage.
+          window.localStorage.removeItem("emailForSignIn");
+          // You can access the new user via result.user
+          // Additional user info profile not available via:
+          // result.additionalUserInfo.profile == null
+          // You can check if the user is new or existing:
+          // result.additionalUserInfo.isNewUser
+        })
+        .catch((error) => {
+          // Some error occurred, you can inspect the code: error.code
+          // Common errors could be invalid email and invalid or expired OTPs.
+        });
+    }
+  }, []);
 
   return (
     <div className="row flex-center flex">
@@ -166,6 +204,140 @@ export default function Auth() {
           </form>
         )}
       </div>
+    </div>
+  );
+}
+```
+
+### Account page
+
+After a user is signed in we can allow them to edit their profile details and manage their account.
+
+Let's create a new component for that called src/Account.js.
+
+```jsx
+import { collection, getDoc, doc, setDoc } from "firebase/firestore";
+import { useState, useEffect } from "react";
+import { auth, firestore } from "./firebaseClient";
+
+const Account = ({ user }) => {
+  const [loading, setLoading] = useState(true);
+  const [username, setUsername] = useState(null);
+  const [website, setWebsite] = useState(null);
+  const [avatar_url, setAvatarUrl] = useState(null);
+
+  useEffect(() => {
+    getProfile();
+  }, [user]);
+
+  const getProfile = async () => {
+    try {
+      setLoading(true);
+      const { data } = await getDoc(
+        doc(collection(firestore, "profiles"), user.uid)
+      );
+
+      if (data) {
+        setUsername(data.username);
+        setWebsite(data.website);
+        setAvatarUrl(data.avatar_url);
+      }
+    } catch (error) {
+      alert(error.message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const updateProfile = async (e) => {
+    e.preventDefault();
+
+    try {
+      setLoading(true);
+      const updates = {
+        username,
+        website,
+        avatar_url,
+        updated_at: new Date(),
+      };
+
+      await setDoc(doc(firestore, "profiles", user.uid), updates);
+    } catch (error) {
+      alert(error.message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <div aria-live="polite">
+      {loading ? (
+        "Saving ..."
+      ) : (
+        <form onSubmit={updateProfile} className="form-widget">
+          <div>Email: {user.email}</div>
+          <div>
+            <label htmlFor="username">Name</label>
+            <input
+              id="username"
+              type="text"
+              value={username || ""}
+              onChange={(e) => setUsername(e.target.value)}
+            />
+          </div>
+          <div>
+            <label htmlFor="website">Website</label>
+            <input
+              id="website"
+              type="url"
+              value={website || ""}
+              onChange={(e) => setWebsite(e.target.value)}
+            />
+          </div>
+          <div>
+            <button className="button primary block" disabled={loading}>
+              Update profile
+            </button>
+          </div>
+        </form>
+      )}
+      <button
+        type="button"
+        className="button block"
+        onClick={() => auth.signOut()}
+      >
+        Sign Out
+      </button>
+    </div>
+  );
+};
+
+export default Account;
+```
+
+## Launch!
+
+Now that we have all the components in place, let's update `src/App.js`:
+
+```jsx
+import "./index.css";
+import { useState, useEffect } from "react";
+import { auth } from "./firebaseClient";
+import Auth from "./Auth";
+import Account from "./Account";
+
+export default function App() {
+  const [user, setUser] = useState(null);
+
+  useEffect(() => {
+    return auth.onAuthStateChanged((user) => {
+      setUser(user);
+    });
+  }, []);
+
+  return (
+    <div className="container" style={{ padding: "50px 0 100px 0" }}>
+      {!user ? <Auth /> : <Account user={user} />}
     </div>
   );
 }
