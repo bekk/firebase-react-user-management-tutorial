@@ -1,70 +1,172 @@
-# Getting Started with Create React App
+# Build a User Management App with React
 
-This project was bootstrapped with [Create React App](https://github.com/facebook/create-react-app).
+This is a Firebase version of the Supabase official tutorial: https://supabase.com/docs/guides/getting-started/tutorials/with-react
+It will help you compare Firebase and Supabase.
 
-## Available Scripts
+This tutorial demonstrates how to build a basic user management app. The app authenticates and identifies the user, stores their profile information in the database, and allows the user to log in, update their profile details, and upload a profile photo. The app uses:
 
-In the project directory, you can run:
+- Firestore Database - a document database for storing your user data and Security Rules so data is protected and users can only access their own information.
+- Firebase Authentication - users log in through magic links sent to their email (without having to set up passwords).
+- Firebase Storage - users can upload a profile photo.
 
-### `npm start`
+## Project setup
 
-Runs the app in the development mode.\
-Open [http://localhost:3000](http://localhost:3000) to view it in your browser.
+Before we start building we're going to set up our Database and API. This is as simple as starting a new Project in Firebase and then creating a web application.
 
-The page will reload when you make changes.\
-You may also see any lint errors in the console.
+### Create a project
 
-### `npm test`
+1. [Create a new project](console.firebase.google.com/) in the Firebase Console.
+2. Enter your project details.
+3. Wait for the new project to launch.
 
-Launches the test runner in the interactive watch mode.\
-See the section about [running tests](https://facebook.github.io/create-react-app/docs/running-tests) for more information.
+### Set up the database
 
-### `npm run build`
+Now we are going to set up the database.
 
-Builds the app for production to the `build` folder.\
-It correctly bundles React in production mode and optimizes the build for the best performance.
+1. Go to the Firestore Database page in the Dashboard.
+2. Initialize the database in your preferred region.
 
-The build is minified and the filenames include the hashes.\
-Your app is ready to be deployed!
+### Get the API Keys
 
-See the section about [deployment](https://facebook.github.io/create-react-app/docs/deployment) for more information.
+Now that you've created the database, you are ready to insert data using the API. We just need to get the project settings from the API settings.
 
-### `npm run eject`
+1. Go to the Project Settings page in the Dashboard.
+2. Set up a new Web app
+3. Find your project config on this page.
 
-**Note: this is a one-way operation. Once you `eject`, you can't go back!**
+## Building the App
 
-If you aren't satisfied with the build tool and configuration choices, you can `eject` at any time. This command will remove the single build dependency from your project.
+Let's start building the React app from scratch.
 
-Instead, it will copy all the configuration files and the transitive dependencies (webpack, Babel, ESLint, etc) right into your project so you have full control over them. All of the commands except `eject` will still work, but they will point to the copied scripts so you can tweak them. At this point you're on your own.
+### Initialize a React app#
 
-You don't have to ever use `eject`. The curated feature set is suitable for small and middle deployments, and you shouldn't feel obligated to use this feature. However we understand that this tool wouldn't be useful if you couldn't customize it when you are ready for it.
+We can use Create React App to initialize an app called firebase-react:
 
-## Learn More
+```
+npx create-react-app firebase-react
+cd firebase-react
+```
 
-You can learn more in the [Create React App documentation](https://facebook.github.io/create-react-app/docs/getting-started).
+Then let's install the only additional dependency: `firebase`.
 
-To learn React, check out the [React documentation](https://reactjs.org/).
+```
+npm install firebase
+```
 
-### Code Splitting
+Create and edit `src/firebaseClient.js`. Paste the project config from your web app that you set up earlier.
 
-This section has moved here: [https://facebook.github.io/create-react-app/docs/code-splitting](https://facebook.github.io/create-react-app/docs/code-splitting)
+```javascript
+// Import the functions you need from the SDKs you need
+import { initializeApp } from "firebase/app";
+// TODO: Add SDKs for Firebase products that you want to use
+// https://firebase.google.com/docs/web/setup#available-libraries
 
-### Analyzing the Bundle Size
+// Your web app's Firebase configuration
+const firebaseConfig = {
+  apiKey: "...",
+  authDomain: "...",
+  projectId: "...",
+  storageBucket: "...",
+  messagingSenderId: "...",
+  appId: "...",
+};
 
-This section has moved here: [https://facebook.github.io/create-react-app/docs/analyzing-the-bundle-size](https://facebook.github.io/create-react-app/docs/analyzing-the-bundle-size)
+// Initialize Firebase
+const app = initializeApp(firebaseConfig);
+```
 
-### Making a Progressive Web App
+Edit `src/App.js` and import the new file to initalize Firebase on startup:
 
-This section has moved here: [https://facebook.github.io/create-react-app/docs/making-a-progressive-web-app](https://facebook.github.io/create-react-app/docs/making-a-progressive-web-app)
+```diff
+import logo from "./logo.svg";
+import "./App.css";
++import "./firebaseClient";
+```
 
-### Advanced Configuration
+And one optional step is to update the CSS file `src/index.css` to make the app look nice. You can find the full contents of this file [here](https://raw.githubusercontent.com/supabase/supabase/master/examples/user-management/react-user-management/src/index.css).
 
-This section has moved here: [https://facebook.github.io/create-react-app/docs/advanced-configuration](https://facebook.github.io/create-react-app/docs/advanced-configuration)
+### Set up a Login component
 
-### Deployment
+Let's set up a React component to manage logins and sign ups. We'll use Magic Links, so users can sign in with their email without using passwords.
 
-This section has moved here: [https://facebook.github.io/create-react-app/docs/deployment](https://facebook.github.io/create-react-app/docs/deployment)
+Create and edit `src/Auth.js`:
 
-### `npm run build` fails to minify
+```jsx
+import { useState } from "react";
+import { getAuth, sendSignInLinkToEmail } from "firebase/auth";
 
-This section has moved here: [https://facebook.github.io/create-react-app/docs/troubleshooting#npm-run-build-fails-to-minify](https://facebook.github.io/create-react-app/docs/troubleshooting#npm-run-build-fails-to-minify)
+const auth = getAuth();
+
+export default function Auth() {
+  const [loading, setLoading] = useState(false);
+  const [email, setEmail] = useState("");
+
+  const handleLogin = async (e) => {
+    e.preventDefault();
+
+    try {
+      setLoading(true);
+
+      const actionCodeSettings = {
+        // URL you want to redirect back to. The domain (www.example.com) for this
+        // URL must be in the authorized domains list in the Firebase Console.
+        url: "http://localhost:3000/finishSignUp",
+        // This must be true.
+        handleCodeInApp: true,
+      };
+      const { error } = await sendSignInLinkToEmail(
+        auth,
+        email,
+        actionCodeSettings
+      )
+        .then(() => {
+          // The link was successfully sent. Inform the user.
+          // Save the email locally so you don't need to ask the user for it again
+          // if they open the link on the same device.
+          window.localStorage.setItem("emailForSignIn", email);
+          // ...
+        })
+        .catch((error) => {
+          const errorCode = error.code;
+          const errorMessage = error.message;
+          // ...
+        });
+      if (error) throw error;
+      alert("Check your email for the login link!");
+    } catch (error) {
+      alert(error.error_description || error.message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <div className="row flex-center flex">
+      <div className="col-6 form-widget" aria-live="polite">
+        <h1 className="header">Firebase + React</h1>
+        <p className="description">
+          Sign in via magic link with your email below
+        </p>
+        {loading ? (
+          "Sending magic link..."
+        ) : (
+          <form onSubmit={handleLogin}>
+            <label htmlFor="email">Email</label>
+            <input
+              id="email"
+              className="inputField"
+              type="email"
+              placeholder="Your email"
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+            />
+            <button className="button block" aria-live="polite">
+              Send magic link
+            </button>
+          </form>
+        )}
+      </div>
+    </div>
+  );
+}
+```
